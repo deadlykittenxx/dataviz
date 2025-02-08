@@ -1,7 +1,7 @@
 let table;
 let filters = { Depression: false, Anxiety: false, PanicAttack: false };
 let checkboxes = {};
-let studentCounts = {}; // Store student counts
+let studentCounts = {}; // Store student ratios by condition
 
 // Course category mapping
 const courseCategories = {
@@ -47,34 +47,30 @@ function preload() {
 }
 
 function setup() {
-  const canvas = createCanvas(windowWidth-50, windowHeight);
+  const canvas = createCanvas(windowWidth - 50, windowHeight + 500);
   canvas.parent("sketch-container");
-  
-  canvas.style("display", "block"); // 캔버스가 위쪽에 정렬되도록 함
-  canvas.style("margin", "0 auto"); 
+  canvas.style("display", "block");
+  canvas.style("margin", "0 auto");
   canvas.style("padding", "3rem");
 
   textAlign(CENTER, CENTER);
   textFont("Rokkitt");
   noLoop();
 
-
   // Create filter checkboxes
   checkboxes["Depression"] = createCheckbox("Depression", false)
     .parent("sketch-container")
-    .position(canvas.position().x, canvas.position().y)
+    .position(canvas.position().x, canvas.position().y + 200)
     .changed(() => updateFilter("Depression"));
   checkboxes["Anxiety"] = createCheckbox("Anxiety", false)
     .parent("sketch-container")
-    .position(canvas.position().x, canvas.position().y+30)
+    .position(canvas.position().x, canvas.position().y + 230)
     .changed(() => updateFilter("Anxiety"));
   checkboxes["PanicAttack"] = createCheckbox("Panic Attack", false)
     .parent("sketch-container")
-    .position(canvas.position().x, canvas.position().y+60)
+    .position(canvas.position().x, canvas.position().y + 260)
     .changed(() => updateFilter("PanicAttack"));
-
 }
-
 
 function draw() {
   background('#f6f4ed');
@@ -92,7 +88,6 @@ function draw() {
     { label: "StudyHoursPerWeek", parts: 4 }
   ];
 
-  
   drawAttributeLabels(-PI, 0, attributes);
   drawAttributeLabels(0, PI, attributes);
   drawRadialSegments(-PI, 0, attributes, "female");
@@ -106,40 +101,31 @@ function updateFilter(filter) {
 }
 
 function filterData() {
+  // Return all rows from the table
   return table.getRows();
-  // let rows = table.getRows();
-  // const activeFilters = Object.values(filters).some(val => val);
-  // return activeFilters ? rows.filter(row => {
-  //   for (let filter in filters) {
-  //     if (filters[filter] && row.getString(filter) !== "1") return false;
-  //   }
-  //   return true;
-  // }) : rows;
 }
 
 function processStudentCounts(data) {
   studentCounts = {};
-  //let maxCount = 0;
-  let totalStudents = data.length;
+  let genderAgeCounts = {}; // Count total students per age-gender group
 
-  for (let row of data) {
+  data.forEach(row => {
     let age = +row.getString("Age");
     let gender = row.getString("Gender").toLowerCase();
+
+    // Count total for each age-gender group
+    let gaKey = `${age}-${gender}`;
+    genderAgeCounts[gaKey] = (genderAgeCounts[gaKey] || 0) + 1;
+
     let course = row.getString("Course");
     let category = courseCategories[course] || "Unknown";
-
-    if (category === "Unknown") continue;
+    if (category === "Unknown") return; // Skip if course category is unknown
 
     let gpa = parseFloat(row.getString("CGPA")) || 0;
-    let gpaCategory;
-    if (gpa >= 0 && gpa < 1) gpaCategory = "0-1";
-    else if (gpa >= 1 && gpa < 2) gpaCategory = "1-2";
-    else if (gpa >= 2 && gpa < 3) gpaCategory = "2-3";
-    else if (gpa >= 3 && gpa <= 4) gpaCategory = "3-4";
-    else gpaCategory = "Unknown";
+    let gpaCategory = gpa < 1 ? "0-1" : gpa < 2 ? "1-2" : gpa < 3 ? "2-3" : "3-4";
 
     let sleepQuality = parseInt(row.getString("SleepQuality").trim()) || 1;
-    sleepQuality = Math.min(Math.max(sleepQuality, 1), 5);
+    sleepQuality = constrain(sleepQuality, 1, 5);
 
     let studyHours = row.getString("StudyHoursPerWeek");
     let studyHoursCategory = getStudyHoursCategory(studyHours);
@@ -153,57 +139,59 @@ function processStudentCounts(data) {
       "StudyHoursPerWeek": studyHoursCategory
     };
 
-    
-
-    // filter check
-    // let hasCondition = false;
-    // if (Object.values(filters).some(val => val)) {
-    //   for (let filter in filters) {
-    //     if (filters[filter] && row.getString(filter) === "1") {
-    //       hasCondition = true;
-    //       break;
-    //     }
-    //   }
-    // } else {
-    //   // if there's no filter, include all the students
-    //   hasCondition = true;
-    // }
-
-    let hasAllConditions = true;
+    // Determine if the row meets all active filter conditions
+    let meetsFilters = true;
     if (Object.values(filters).some(val => val)) {
-      for (let filter in filters) {
-        if (filters[filter] && row.getString(filter) !== "1") {
-          hasAllConditions = false;
+      for (let f in filters) {
+        if (filters[f] && row.getString(f) !== "1") {
+          meetsFilters = false;
           break;
         }
       }
-    } else {
-      // 필터가 없으면 모든 학생을 포함
-      hasAllConditions = true;
     }
 
-
-    
+    // Update studentCounts for each attribute
     for (let attribute in attributeValues) {
       let key = `${age}-${gender}-${attribute}-${attributeValues[attribute]}`;
       if (!studentCounts[key]) {
         studentCounts[key] = { total: 0, condition: 0 };
       }
-      studentCounts[key].total++; // 전체 학생 수
-      if (hasAllConditions) {
-        studentCounts[key].condition++; // 모든 조건 충족 학생 수
+      studentCounts[key].total++;
+      if (meetsFilters) {
+        studentCounts[key].condition++;
       }
     }
-  }
+  });
 
+  // Calculate ratios for each key in studentCounts
   for (let key in studentCounts) {
     if (Object.values(filters).some(val => val)) {
-      // 필터가 활성화된 경우: 조건 충족 비율 계산
       studentCounts[key] = studentCounts[key].condition / studentCounts[key].total;
     } else {
-      // 필터가 없는 경우: 전체 학생 수 대비 비율 계산
-      studentCounts[key] = studentCounts[key].total / totalStudents;
+      let parts = key.split('-'); // Format: "age-gender-attribute-value"
+      let age = parts[0];
+      let gender = parts[1];
+      let totalForGroup = genderAgeCounts[`${age}-${gender}`] || 1;
+      studentCounts[key] = studentCounts[key].total / totalForGroup;
     }
+  }
+}
+
+// Helper function to draw arcs for all ages in a given segment (part)
+function drawArcsForPart(partStartAngle, partEndAngle, keyFunc, gender, radiusStep, minOpacity) {
+  for (let j = 0; j < 7; j++) {
+    let age = 18 + j;
+    let r = (j + 0.5) * radiusStep;
+    let key = keyFunc(age);
+    let opacity = (studentCounts[key] || 0) * 255;
+    opacity = max(opacity, minOpacity);
+    if (gender === 'female') {
+      fill(225, 206, 122, opacity);
+    } else {
+      fill(191, 210, 191, opacity);
+    }
+    noStroke();
+    arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
   }
 }
 
@@ -212,171 +200,121 @@ function drawRadialSegments(startAngle, endAngle, attributes, gender) {
   let maxRadius = height / 2.5;
   let radiusStep = maxRadius / 7;
 
-  for (let i = 0; i < attributes.length; i++) {
-    let attr = attributes[i];
+  attributes.forEach((attr, i) => {
     let label = attr.label;
     let parts = attr.parts;
     let segmentAngle = totalAngle / attributes.length;
     let attrStartAngle = startAngle + i * segmentAngle;
+    let partAngleStep = segmentAngle / parts;
 
     if (label === "YearOfStudy") {
+      // Use 4 parts for YearOfStudy
       parts = 4;
       let yearSegmentAngle = segmentAngle / parts;
-
       for (let part = 0; part < parts; part++) {
         let year = part + 1;
         let partStartAngle = attrStartAngle + part * yearSegmentAngle;
         let partEndAngle = partStartAngle + yearSegmentAngle;
-
-        for (let j = 0; j < 7; j++) {
-          let age = 18 + j;
-          let r = (j + 0.5) * radiusStep;
-          let key = `${age}-${gender}-${label}-${year}`;
-          let opacity = (studentCounts[key] || 0) * 255;
-          opacity = max(opacity, 50);
-
-          fill(gender === 'female' ? [225, 206, 122, opacity] : [191, 210, 191, opacity]);
-          noStroke();
-          arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
-        }
+        drawArcsForPart(
+          partStartAngle,
+          partEndAngle,
+          age => `${age}-${gender}-YearOfStudy-${year}`,
+          gender,
+          radiusStep,
+          20
+        );
       }
-    } 
-    else if (label === "Course") {
-      let partAngleStep = segmentAngle / parts;
+    } else if (label === "Course") {
       for (let part = 0; part < parts; part++) {
         let partStartAngle = attrStartAngle + part * partAngleStep;
         let partEndAngle = partStartAngle + partAngleStep;
-
-        for (let j = 0; j < 7; j++) {
-          let age = 18 + j;
-          let r = (j + 0.5) * radiusStep;
-          let key = `${age}-${gender}-${label}-${courseCategoryLabels[part]}`;
-          
-          let ratio = studentCounts[key] || 0;
-          let opacity = ratio * 255; // 0%~100% → 0~255
-          opacity = max(opacity, 30);
-
-          fill(gender === 'female' ? [225, 206, 122, opacity] : [191, 210, 191, opacity]);
-          noStroke();
-          arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
-        }
+        drawArcsForPart(
+          partStartAngle,
+          partEndAngle,
+          age => `${age}-${gender}-Course-${courseCategoryLabels[part]}`,
+          gender,
+          radiusStep,
+          20
+        );
       }
-    }
-    else if (label === "AcademicEngagement") {
-      let partAngleStep = segmentAngle / parts;
+    } else if (label === "AcademicEngagement") {
       for (let part = 0; part < parts; part++) {
         let partStartAngle = attrStartAngle + part * partAngleStep;
         let partEndAngle = partStartAngle + partAngleStep;
-
-        for (let j = 0; j < 7; j++) {
-          let age = 18 + j;
-          let r = (j + 0.5) * radiusStep;
-          let engagementValue = part + 1;
-          let key = `${age}-${gender}-${label}-${engagementValue}`;
-          let opacity = (studentCounts[key] || 0) * 255;
-          opacity = max(opacity, 50);
-
-          fill(gender === 'female' ? [225, 206, 122, opacity] : [191, 210, 191, opacity]);
-          noStroke();
-          arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
-        }
+        drawArcsForPart(
+          partStartAngle,
+          partEndAngle,
+          age => `${age}-${gender}-AcademicEngagement-${part + 1}`,
+          gender,
+          radiusStep,
+          20
+        );
       }
-    }
-    else if (label === "GPA") {
-      let partAngleStep = segmentAngle / parts;
+    } else if (label === "GPA") {
       for (let part = 0; part < parts; part++) {
         let partStartAngle = attrStartAngle + part * partAngleStep;
         let partEndAngle = partStartAngle + partAngleStep;
-
-        for (let j = 0; j < 7; j++) {
-          let age = 18 + j;
-          let r = (j + 0.5) * radiusStep;
-          let gpaCategory;
-          if (part === 0) gpaCategory = "0-1";
-          else if (part === 1) gpaCategory = "1-2";
-          else if (part === 2) gpaCategory = "2-3";
-          else if (part === 3) gpaCategory = "3-4";
-          let key = `${age}-${gender}-${label}-${gpaCategory}`;
-          let opacity = (studentCounts[key] || 0) * 255;
-          opacity = max(opacity, 50);
-
-          fill(gender === 'female' ? [225, 206, 122, opacity] : [191, 210, 191, opacity]);
-          noStroke();
-          arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
-        }
+        let gpaCategory = part === 0 ? "0-1" : part === 1 ? "1-2" : part === 2 ? "2-3" : "3-4";
+        drawArcsForPart(
+          partStartAngle,
+          partEndAngle,
+          age => `${age}-${gender}-GPA-${gpaCategory}`,
+          gender,
+          radiusStep,
+          20
+        );
       }
-    }
-    else if (label === "SleepQuality") {
-      let partAngleStep = segmentAngle / parts;
+    } else if (label === "SleepQuality") {
       for (let part = 0; part < parts; part++) {
         let partStartAngle = attrStartAngle + part * partAngleStep;
         let partEndAngle = partStartAngle + partAngleStep;
-
-        for (let j = 0; j < 7; j++) {
-          let age = 18 + j;
-          let r = (j + 0.5) * radiusStep;
-          let sleepQuality = part + 1;
-          let key = `${age}-${gender}-${label}-${sleepQuality}`;
-          let opacity = (studentCounts[key] || 0) * 255;
-          opacity = max(opacity, 50);
-
-          fill(gender === 'female' ? [225, 206, 122, opacity] : [191, 210, 191, opacity]);
-          noStroke();
-          arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
-        }
+        drawArcsForPart(
+          partStartAngle,
+          partEndAngle,
+          age => `${age}-${gender}-SleepQuality-${part + 1}`,
+          gender,
+          radiusStep,
+          20
+        );
       }
-    }
-    else if (label === "StudyHoursPerWeek") {
-      let partAngleStep = segmentAngle / parts;
+    } else if (label === "StudyHoursPerWeek") {
       const hourCategories = ["1-4", "5-9", "10-14", "15-19"];
       for (let part = 0; part < parts; part++) {
         let partStartAngle = attrStartAngle + part * partAngleStep;
         let partEndAngle = partStartAngle + partAngleStep;
-
-        for (let j = 0; j < 7; j++) {
-          let age = 18 + j;
-          let r = (j + 0.5) * radiusStep;
-          let category = hourCategories[part];
-          let key = `${age}-${gender}-${label}-${category}`;
-          let opacity = (studentCounts[key] || 0) * 255;
-          opacity = max(opacity, 50);
-
-          fill(gender === 'female' ? [225, 206, 122, opacity] : [191, 210, 191, opacity]);
-          noStroke();
-          arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
-        }
+        drawArcsForPart(
+          partStartAngle,
+          partEndAngle,
+          age => `${age}-${gender}-StudyHoursPerWeek-${hourCategories[part]}`,
+          gender,
+          radiusStep,
+          20
+        );
       }
-    }
-    else {
-      let partAngleStep = segmentAngle / parts;
+    } else {
+      // Default case for other attributes
       for (let part = 0; part < parts; part++) {
         let partStartAngle = attrStartAngle + part * partAngleStep;
         let partEndAngle = partStartAngle + partAngleStep;
-
-        for (let j = 0; j < 7; j++) {
-          let age = 18 + j;
-          let r = (j + 0.5) * radiusStep;
-          let key = `${age}-${gender}-${label}-${part + 1}`;
-          let opacity = (studentCounts[key] || 0) * 255;
-          opacity = max(opacity, 50);
-
-          fill(gender === 'female' ? [225, 206, 122, opacity] : [191, 210, 191, opacity]);
-          noStroke();
-          arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
-        }
+        drawArcsForPart(
+          partStartAngle,
+          partEndAngle,
+          age => `${age}-${gender}-${label}-${part + 1}`,
+          gender,
+          radiusStep,
+          20
+        );
       }
     }
-  }
+  });
 }
 
 function drawAgeLabels() {
   let maxRadius = height / 2.5;
   let radiusStep = maxRadius / 7;
-
   fill(0);
   textAlign(CENTER, CENTER);
   textSize(12);
-
   for (let i = 0; i < 7; i++) {
     let age = 18 + i;
     let r = (i + 0.5) * radiusStep;
@@ -384,90 +322,88 @@ function drawAgeLabels() {
   }
 }
 
-function drawAttributeLabels(startAngle, endAngle, attributes) {
-  let totalAngle = abs(endAngle - startAngle);
-  let maxRadius = height / 2.5 + 40;
-
-  fill(0);
-  textAlign(CENTER, CENTER);
-  textSize(10);
-
-  for (let i = 0; i < attributes.length; i++) {
-    let attr = attributes[i];
-    let label = attr.label;
-    let parts = attr.parts;
-    let segmentAngle = totalAngle / attributes.length;
-
-    let attrCenterAngle = startAngle + i * segmentAngle + segmentAngle / 2;
-    let x = (maxRadius + 20) * cos(attrCenterAngle);
-    let y = (maxRadius + 20) * sin(attrCenterAngle);
-    text(label, x, y);
-
-    if (label === "YearOfStudy") {
-      parts = 4;
-      let yearSegmentAngle = segmentAngle / parts;
-
-      for (let part = 0; part < parts; part++) {
-        let angle = startAngle + i * segmentAngle + part * yearSegmentAngle + yearSegmentAngle / 2;
-        let x = maxRadius * cos(angle);
-        let y = maxRadius * sin(angle);
-        text(part + 1, x, y);
-      }
-    } 
-    else if (label === "AcademicEngagement") {
-      let partAngleStep = segmentAngle / parts;
-      for (let part = 0; part < parts; part++) {
-        let angle = startAngle + i * segmentAngle + part * partAngleStep + partAngleStep / 2;
-        let x = maxRadius * cos(angle);
-        let y = maxRadius * sin(angle);
-        text(part + 1, x, y);
-      }
+// Helper function to draw sub-labels for an attribute (e.g., Year numbers, GPA ranges)
+function drawSubLabelsForAttribute(attr, startAngle, segmentAngle, maxRadius) {
+  let parts = attr.parts;
+  if (attr.label === "YearOfStudy") {
+    // Use 4 parts for YearOfStudy
+    parts = 4;
+    let yearSegmentAngle = segmentAngle / parts;
+    for (let part = 0; part < parts; part++) {
+      let angle = startAngle + part * yearSegmentAngle + yearSegmentAngle / 2;
+      let x = maxRadius * cos(angle);
+      let y = maxRadius * sin(angle);
+      text(part + 1, x, y);
     }
-    else if (label === "GPA") {
-      let partAngleStep = segmentAngle / parts;
-      for (let part = 0; part < parts; part++) {
-        let angle = startAngle + i * segmentAngle + part * partAngleStep + partAngleStep / 2;
-        let x = maxRadius * cos(angle);
-        let y = maxRadius * sin(angle);
-        let gpaLabel;
-        if (part === 0) gpaLabel = "0-1";
-        else if (part === 1) gpaLabel = "1-2";
-        else if (part === 2) gpaLabel = "2-3";
-        else if (part === 3) gpaLabel = "3-4";
-        text(gpaLabel, x, y);
-      }
+  } else if (attr.label === "AcademicEngagement") {
+    let partAngleStep = segmentAngle / parts;
+    for (let part = 0; part < parts; part++) {
+      let angle = startAngle + part * partAngleStep + partAngleStep / 2;
+      let x = maxRadius * cos(angle);
+      let y = maxRadius * sin(angle);
+      text(part + 1, x, y);
     }
-    else if (label === "SleepQuality") {
-      let partAngleStep = segmentAngle / parts;
-      for (let part = 0; part < parts; part++) {
-        let angle = startAngle + i * segmentAngle + part * partAngleStep + partAngleStep / 2;
-        let x = maxRadius * cos(angle);
-        let y = maxRadius * sin(angle);
-        text(part + 1, x, y);
-      }
+  } else if (attr.label === "GPA") {
+    let partAngleStep = segmentAngle / parts;
+    for (let part = 0; part < parts; part++) {
+      let angle = startAngle + part * partAngleStep + partAngleStep / 2;
+      let x = maxRadius * cos(angle);
+      let y = maxRadius * sin(angle);
+      let gpaLabel = part === 0 ? "0-1" : part === 1 ? "1-2" : part === 2 ? "2-3" : "3-4";
+      text(gpaLabel, x, y);
     }
-    else if (label === "StudyHoursPerWeek") {
-      const hourLabels = ["1-4", "5-9", "10-14", "15-19"];
-      let partAngleStep = segmentAngle / parts;
-      for (let part = 0; part < parts; part++) {
-        let angle = startAngle + i * segmentAngle + part * partAngleStep + partAngleStep / 2;
-        let x = maxRadius * cos(angle);
-        let y = maxRadius * sin(angle);
-        text(hourLabels[part], x, y);
-      }
+  } else if (attr.label === "SleepQuality") {
+    let partAngleStep = segmentAngle / parts;
+    for (let part = 0; part < parts; part++) {
+      let angle = startAngle + part * partAngleStep + partAngleStep / 2;
+      let x = maxRadius * cos(angle);
+      let y = maxRadius * sin(angle);
+      text(part + 1, x, y);
     }
-    else if (label === "Course") {
-      let partAngleStep = segmentAngle / parts;
-      for (let part = 0; part < parts; part++) {
-        let angle = startAngle + i * segmentAngle + part * partAngleStep + partAngleStep / 2;
-        let x = maxRadius * cos(angle);
-        let y = maxRadius * sin(angle);
-        text(courseCategoryLabels[part], x, y); 
-      }
+  } else if (attr.label === "StudyHoursPerWeek") {
+    const hourLabels = ["1-4", "5-9", "10-14", "15-19"];
+    let partAngleStep = segmentAngle / parts;
+    for (let part = 0; part < parts; part++) {
+      let angle = startAngle + part * partAngleStep + partAngleStep / 2;
+      let x = maxRadius * cos(angle);
+      let y = maxRadius * sin(angle);
+      text(hourLabels[part], x, y);
+    }
+  } else if (attr.label === "Course") {
+    let partAngleStep = segmentAngle / parts;
+    for (let part = 0; part < parts; part++) {
+      let angle = startAngle + part * partAngleStep + partAngleStep / 2;
+      let x = maxRadius * cos(angle);
+      let y = maxRadius * sin(angle);
+      text(courseCategoryLabels[part], x, y);
     }
   }
 }
 
+function drawAttributeLabels(startAngle, endAngle, attributes) {
+  let totalAngle = abs(endAngle - startAngle);
+  let maxRadius = height / 2.5 + 40;
+  fill(0);
+  textAlign(CENTER, CENTER);
+
+  // Draw main attribute labels (e.g., "YearOfStudy") with larger text
+  textSize(18);
+  attributes.forEach((attr, i) => {
+    let segmentAngle = totalAngle / attributes.length;
+    let attrCenterAngle = startAngle + i * segmentAngle + segmentAngle / 2;
+    let x = (maxRadius + 20) * cos(attrCenterAngle);
+    let y = (maxRadius + 20) * sin(attrCenterAngle);
+    text(attr.label, x, y);
+  });
+
+  // Draw sub-labels (e.g., "1", "2", "3", etc.) with smaller text
+  textSize(10);
+  attributes.forEach((attr, i) => {
+    let segmentAngle = totalAngle / attributes.length;
+    let attrStartAngle = startAngle + i * segmentAngle;
+    drawSubLabelsForAttribute(attr, attrStartAngle, segmentAngle, maxRadius);
+  });
+}
 
 function getStudyHoursCategory(hours) {
   hours = parseInt(hours);
