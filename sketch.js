@@ -78,7 +78,7 @@ function draw() {
   // Move origin to canvas center
   translate(width / 2, height / 2);
 
-  // Clear arcs array at the beginning of each draw
+  // Clear arcs array
   arcs = [];
 
   let filteredData = filterData();
@@ -93,16 +93,33 @@ function draw() {
     { label: "StudyHoursPerWeek", parts: 4 }
   ];
 
-  // Draw main labels and sub-labels
-  drawAttributeLabels(-PI, 0, attributes);
-  drawAttributeLabels(0, PI, attributes);
-  // Draw radial segments for female and male groups
+  // 1. Draw radial segments first to fill arcs
   drawRadialSegments(-PI, 0, attributes, "female");
   drawRadialSegments(0, PI, attributes, "male");
-  // Draw age labels (centered on each ring)
+
+  // 2. Compute hovered attribute from arcs based on current mouse position
+  let hoveredAttribute = null;
+  let mx = mouseX - width / 2;
+  let my = mouseY - height / 2;
+  let d = sqrt(mx * mx + my * my);
+  let a = atan2(my, mx);
+  for (let arcObj of arcs) {
+    if (d >= arcObj.innerRadius &&
+        d <= arcObj.outerRadius &&
+        isAngleBetween(a, arcObj.startAngle, arcObj.endAngle)) {
+      hoveredAttribute = arcObj.attribute;
+      break;
+    }
+  }
+
+  // 3. Draw attribute labels with color: gray by default, black if hovered
+  drawAttributeLabelsWithColor(-PI, 0, attributes, hoveredAttribute);
+  drawAttributeLabelsWithColor(0, PI, attributes, hoveredAttribute);
+
+  // 4. Draw age labels
   drawAgeLabels();
 
-  // Check for mouse hover and show tooltip (if any)
+  // 5. Draw tooltip (which also displays the sub-label for the hovered segment)
   showTooltip();
 }
 
@@ -128,14 +145,12 @@ function processStudentCounts(data) {
   data.forEach(row => {
     let age = +row.getString("Age");
     let gender = row.getString("Gender").toLowerCase();
-
-    // Count total for each age-gender group
     let gaKey = `${age}-${gender}`;
     genderAgeCounts[gaKey] = (genderAgeCounts[gaKey] || 0) + 1;
 
     let course = row.getString("Course");
     let category = courseCategories[course] || "Unknown";
-    if (category === "Unknown") return; // Skip if course category is unknown
+    if (category === "Unknown") return;
 
     let gpa = parseFloat(row.getString("CGPA")) || 0;
     let gpaCategory = gpa < 1 ? "0-1" : gpa < 2 ? "1-2" : gpa < 3 ? "2-3" : "3-4";
@@ -155,7 +170,6 @@ function processStudentCounts(data) {
       "StudyHoursPerWeek": studyHoursCategory
     };
 
-    // Determine if the row meets all active filter conditions
     let meetsFilters = true;
     if (Object.values(filters).some(val => val)) {
       for (let f in filters) {
@@ -166,7 +180,6 @@ function processStudentCounts(data) {
       }
     }
 
-    // Update studentCounts for each attribute
     for (let attribute in attributeValues) {
       let key = `${age}-${gender}-${attribute}-${attributeValues[attribute]}`;
       if (!studentCounts[key]) {
@@ -179,12 +192,11 @@ function processStudentCounts(data) {
     }
   });
 
-  // Calculate ratios for each key in studentCounts
   for (let key in studentCounts) {
     if (Object.values(filters).some(val => val)) {
       studentCounts[key] = studentCounts[key].condition / studentCounts[key].total;
     } else {
-      let parts = key.split('-'); // Format: "age-gender-attribute-value"
+      let parts = key.split('-');
       let age = parts[0];
       let gender = parts[1];
       let totalForGroup = genderAgeCounts[`${age}-${gender}`] || 1;
@@ -193,19 +205,22 @@ function processStudentCounts(data) {
   }
 }
 
-// Helper function to draw arcs for all ages in a given segment (part)
-// Also, store each arc's details into the global 'arcs' array for tooltip interaction.
+// ------------------------
+// DRAWING FUNCTIONS
+// ------------------------
+
+// drawArcsForPart: Draws arcs for all age rings for a given segment and stores details (including transformed sub-label text)
 function drawArcsForPart(partStartAngle, partEndAngle, keyFunc, gender, radiusStep, minOpacity) {
   for (let j = 0; j < 7; j++) {
     let age = 18 + j;
-    // Compute ring boundaries (approximate inner and outer radii)
     let innerR = j * radiusStep;
     let outerR = (j + 1) * radiusStep;
-    let r = (j + 0.5) * radiusStep; // Center radius for drawing
-    let key = keyFunc(age);
+    let r = (j + 0.5) * radiusStep;
+    let key = keyFunc(age); // e.g., "18-female-YearOfStudy-1"
     let ratio = (studentCounts[key] || 0);
     let opacity = ratio * 255;
     opacity = max(opacity, minOpacity);
+    
     if (gender === 'female') {
       fill(225, 206, 122, opacity);
     } else {
@@ -214,16 +229,53 @@ function drawArcsForPart(partStartAngle, partEndAngle, keyFunc, gender, radiusSt
     noStroke();
     arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
     
-    // Extract value from key (assumes key format "age-gender-attribute-value")
-    let keyParts = key.split('-');
-    let value = keyParts[3];
+    // Determine sub-label text based on attribute type
+    let keyParts = key.split('-'); // Format: "age-gender-attribute-value"
+    let rawValue = keyParts[3]; // Original value
+    let labelText = rawValue;   // Default
     
-    // Store arc details for tooltip interaction
+    if (keyParts[2] === "YearOfStudy") {
+      const mapping = { "1": "1st year", "2": "2nd year", "3": "3rd year", "4": "4th year" };
+      labelText = mapping[rawValue] || rawValue;
+    } else if (keyParts[2] === "GPA") {
+      const mapping = { "0-1": "0 - 1.0", "1-2": "1.1-2.0", "2-3": "2.1-3.0", "3-4": "3.1-4.0" };
+      labelText = mapping[rawValue] || rawValue;
+    } else if (keyParts[2] === "StudyHoursPerWeek") {
+      const mapping = { "1": "Less than 4 hour", "5": "5-10 hours", "10": "11-14 hours", "15": "More than 15 hours" };
+      labelText = mapping[rawValue] || rawValue;
+    } else if (keyParts[2] === "AcademicEngagement") {
+      // For Academic Engagement, display endpoints (or a range if desired)
+      if (rawValue === "1") {
+        labelText = "Very Low";
+      } else if (rawValue === "2") {
+        labelText = "Low";
+      } else if (rawValue === "3") {
+        labelText = "Moderate";
+      } else if (rawValue === "4") {
+        labelText = "High";
+      } else if (rawValue === "5") {
+        labelText = "Very High";
+      }
+    } else if (keyParts[2] === "SleepQuality") {
+      if (rawValue === "1") {
+        labelText = "Very Poor";
+      } else if (rawValue === "2") {
+        labelText = "Poor";
+      } else if (rawValue === "3") {
+        labelText = "Moderate";
+      } else if (rawValue === "4") {
+        labelText = "Good";
+      } else if (rawValue === "5") {
+        labelText = "Very Good";
+      }
+    }
+    
     arcs.push({
       age: age,
       gender: gender,
       attribute: keyParts[2],
-      value: value,
+      value: rawValue,      // Original value
+      labelText: labelText, // Transformed sub-label text
       ratio: ratio,
       innerRadius: innerR,
       outerRadius: outerR,
@@ -246,7 +298,6 @@ function drawRadialSegments(startAngle, endAngle, attributes, gender) {
     let partAngleStep = segmentAngle / parts;
 
     if (label === "YearOfStudy") {
-      // Use 4 parts for YearOfStudy
       parts = 4;
       let yearSegmentAngle = segmentAngle / parts;
       for (let part = 0; part < parts; part++) {
@@ -329,7 +380,6 @@ function drawRadialSegments(startAngle, endAngle, attributes, gender) {
         );
       }
     } else {
-      // Default case for other attributes
       for (let part = 0; part < parts; part++) {
         let partStartAngle = attrStartAngle + part * partAngleStep;
         let partEndAngle = partStartAngle + partAngleStep;
@@ -359,24 +409,26 @@ function drawAgeLabels() {
   }
 }
 
-// Draw main attribute labels (e.g., "YearOfStudy") and sub-labels are now drawn on hover
-function drawAttributeLabels(startAngle, endAngle, attributes) {
+// Draw main attribute labels with color based on hovered attribute.
+// If an attribute label matches the hovered attribute, draw it in black; otherwise, in gray.
+function drawAttributeLabelsWithColor(startAngle, endAngle, attributes, hoveredAttribute) {
   let totalAngle = abs(endAngle - startAngle);
   let maxRadius = height / 2.5 + 40;
-  fill(0);
   textAlign(CENTER, CENTER);
-
-  // Draw main labels with larger text
   textSize(18);
   attributes.forEach((attr, i) => {
     let segmentAngle = totalAngle / attributes.length;
     let attrCenterAngle = startAngle + i * segmentAngle + segmentAngle / 2;
     let x = (maxRadius + 20) * cos(attrCenterAngle);
     let y = (maxRadius + 20) * sin(attrCenterAngle);
+    // Default color: gray (e.g., 150); if hovered attribute equals attr.label, use black (0)
+    if (attr.label === hoveredAttribute) {
+      fill(0);
+    } else {
+      fill(150);
+    }
     text(attr.label, x, y);
   });
-  
-  // Sub-labels are not drawn here by default; they will be shown on hover via tooltip
 }
 
 function showTooltip() {
@@ -398,23 +450,18 @@ function showTooltip() {
   }
 
   if (hovered) {
-    // Save current transformation state
+    // Draw tooltip background using screen coordinates
     push();
-    // Reset transformation so that tooltip uses screen coordinates
     resetMatrix();
-    
-    // Adjust tooltip position as desired
     let tooltipX = mouseX + 10;
     let tooltipY = mouseY + 10;
-    
-    // Draw tooltip background
+    let padding = 5;
+    textSize(12);
     let tooltipText = "Age: " + hovered.age +
       ", Ratio: " + nf(hovered.ratio * 100, 1, 1) + "%";
     fill(255, 255, 200);
     stroke(0);
     rectMode(CORNER);
-    let padding = 5;
-    textSize(12);
     let tw = textWidth(tooltipText) + padding * 2;
     let th = 16 + padding * 2;
     rect(tooltipX, tooltipY, tw, th);
@@ -422,29 +469,25 @@ function showTooltip() {
     fill(0);
     textAlign(LEFT, TOP);
     text(tooltipText, tooltipX + padding, tooltipY + padding);
-    
     pop();
 
-    // Optionally, you can also draw the sub-label on the arc (if needed)
-    // Here we draw it using the current transformation (if desired)
     // Draw sub-label outside the circle (below the main label)
-    let mainLabelR = height / 2.5 + 20; // same radius used for main labels
-    let offset = 20;                   // additional offset to position sub-label below
-    let subLabelR = mainLabelR + offset; // new radius for sub-label
+    let mainLabelR = height / 2.5;
+    let offset = 20;
+    let subLabelR = mainLabelR + offset;
     let midAngle = (hovered.startAngle + hovered.endAngle) / 2;
     let labelX = subLabelR * cos(midAngle);
     let labelY = subLabelR * sin(midAngle);
+    push();
+    //translate(width / 2, height / 2);
     textAlign(CENTER, CENTER);
-    textSize(10);
+    textSize(16);
     fill(0);
-    text(hovered.value, labelX, labelY);
-
+    text(hovered.labelText, labelX, labelY);
     pop();
   }
 }
 
-
-// Helper function to check if an angle is between start and end (handling wrap-around)
 function isAngleBetween(angle, start, end) {
   let a = (angle + TWO_PI) % TWO_PI;
   let s = (start + TWO_PI) % TWO_PI;
