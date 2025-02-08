@@ -47,23 +47,34 @@ function preload() {
 }
 
 function setup() {
-  const canvas = createCanvas(windowWidth, windowHeight * 1.5);
+  const canvas = createCanvas(windowWidth-50, windowHeight);
   canvas.parent("sketch-container");
+  
+  canvas.style("display", "block"); // 캔버스가 위쪽에 정렬되도록 함
+  canvas.style("margin", "0 auto"); 
+  canvas.style("padding", "3rem");
+
   textAlign(CENTER, CENTER);
   textFont("Rokkitt");
   noLoop();
 
+
   // Create filter checkboxes
   checkboxes["Depression"] = createCheckbox("Depression", false)
     .parent("sketch-container")
+    .position(canvas.position().x, canvas.position().y)
     .changed(() => updateFilter("Depression"));
   checkboxes["Anxiety"] = createCheckbox("Anxiety", false)
     .parent("sketch-container")
+    .position(canvas.position().x, canvas.position().y+30)
     .changed(() => updateFilter("Anxiety"));
   checkboxes["PanicAttack"] = createCheckbox("Panic Attack", false)
     .parent("sketch-container")
+    .position(canvas.position().x, canvas.position().y+60)
     .changed(() => updateFilter("PanicAttack"));
+
 }
+
 
 function draw() {
   background('#f6f4ed');
@@ -81,11 +92,12 @@ function draw() {
     { label: "StudyHoursPerWeek", parts: 4 }
   ];
 
-  drawAgeLabels();
+  
   drawAttributeLabels(-PI, 0, attributes);
   drawAttributeLabels(0, PI, attributes);
   drawRadialSegments(-PI, 0, attributes, "female");
   drawRadialSegments(0, PI, attributes, "male");
+  drawAgeLabels();
 }
 
 function updateFilter(filter) {
