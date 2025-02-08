@@ -459,7 +459,7 @@ function showTooltip() {
     textSize(12);
     let tooltipText = "Age: " + hovered.age +
       ", Ratio: " + nf(hovered.ratio * 100, 1, 1) + "%";
-    fill(255, 255, 200);
+    fill(247, 244, 234);
     stroke(0);
     rectMode(CORNER);
     let tw = textWidth(tooltipText) + padding * 2;
