@@ -4,6 +4,10 @@ let checkboxes = {};
 let studentCounts = {}; // Store student ratios by condition
 let arcs = []; // Array to store arc details for tooltip interaction
 
+
+let globalMinRatio = Infinity;
+let globalMaxRatio = -Infinity;
+
 // Course category mapping
 const courseCategories = {
   "Engineering": "Engineering & Technology",
@@ -48,7 +52,7 @@ function preload() {
 }
 
 function setup() {
-  const canvas = createCanvas(windowWidth - 50, windowHeight + 500);
+  const canvas = createCanvas(windowWidth - 50, windowHeight+500);
   canvas.parent("sketch-container");
   canvas.style("display", "block");
   canvas.style("margin", "0 auto");
@@ -121,6 +125,17 @@ function draw() {
 
   // 5. Draw tooltip (which also displays the sub-label for the hovered segment)
   showTooltip();
+
+  drawGenderLabels();
+  // draw() 함수 내에 추가
+  drawCategoryDividers();
+  
+  drawLegend();
+  //drawLegendPopup();
+  drawDynamicLabel();
+
+  
+
 }
 
 function mouseMoved() {
@@ -141,6 +156,10 @@ function filterData() {
 function processStudentCounts(data) {
   studentCounts = {};
   let genderAgeCounts = {}; // Count total students per age-gender group
+
+  // 초기화
+  globalMinRatio = Infinity;
+  globalMaxRatio = -Infinity;
 
   data.forEach(row => {
     let age = +row.getString("Age");
@@ -192,48 +211,63 @@ function processStudentCounts(data) {
     }
   });
 
+  // 비율 계산 및 globalMinRatio, globalMaxRatio 업데이트
   for (let key in studentCounts) {
+    let total = studentCounts[key].total;
+    if (total === 0) continue; // Avoid division by zero
+
     if (Object.values(filters).some(val => val)) {
-      studentCounts[key] = studentCounts[key].condition / studentCounts[key].total;
+      studentCounts[key].ratio = studentCounts[key].condition / total;
     } else {
       let parts = key.split('-');
       let age = parts[0];
       let gender = parts[1];
       let totalForGroup = genderAgeCounts[`${age}-${gender}`] || 1;
-      studentCounts[key] = studentCounts[key].total / totalForGroup;
+      studentCounts[key].ratio = studentCounts[key].total / totalForGroup;
+    }
+
+    // Update globalMinRatio and globalMaxRatio
+    const ratio = studentCounts[key].ratio;
+    if (!isNaN(ratio)) { // Ensure ratio is a valid number
+      if (ratio < globalMinRatio) globalMinRatio = ratio;
+      if (ratio > globalMaxRatio) globalMaxRatio = ratio;
     }
   }
+
+  console.log("Global Min Ratio:", globalMinRatio);
+  console.log("Global Max Ratio:", globalMaxRatio);
 }
 
-// ------------------------
-// DRAWING FUNCTIONS
-// ------------------------
-
-// drawArcsForPart: Draws arcs for all age rings for a given segment and stores details (including transformed sub-label text)
 function drawArcsForPart(partStartAngle, partEndAngle, keyFunc, gender, radiusStep, minOpacity) {
   for (let j = 0; j < 7; j++) {
     let age = 18 + j;
     let innerR = j * radiusStep;
     let outerR = (j + 1) * radiusStep;
-    let r = (j + 0.5) * radiusStep;
-    let key = keyFunc(age); // e.g., "18-female-YearOfStudy-1"
-    let ratio = (studentCounts[key] || 0);
-    let opacity = ratio * 255;
-    opacity = max(opacity, minOpacity);
-    
+    let key = keyFunc(age);
+    let ratio = (studentCounts[key] || { ratio: 0 }).ratio;
+
+    // Ensure globalMinRatio and globalMaxRatio are not both zero
+    if (globalMinRatio === globalMaxRatio) {
+      globalMaxRatio = globalMinRatio + 1; // Set a default range
+    }
+
+    let normalizedRatio = (ratio - globalMinRatio) / (globalMaxRatio - globalMinRatio);
+    let opacity = normalizedRatio * 255;
+
+    // Set original colors based on gender
     if (gender === 'female') {
-      fill(225, 206, 122, opacity);
+      fill(253, 231, 140, opacity); // Light yellow for female
     } else {
-      fill(191, 210, 191, opacity);
+      fill(182, 219, 167, opacity); // Light green for male
     }
     noStroke();
-    arc(0, 0, r * 2, r * 2, partStartAngle, partEndAngle, PIE);
-    
+    arc(0, 0, outerR * 2, outerR * 2, partStartAngle, partEndAngle, PIE);
+
     // Determine sub-label text based on attribute type
     let keyParts = key.split('-'); // Format: "age-gender-attribute-value"
     let rawValue = keyParts[3]; // Original value
     let labelText = rawValue;   // Default
-    
+
     if (keyParts[2] === "YearOfStudy") {
       const mapping = { "1": "1st year", "2": "2nd year", "3": "3rd year", "4": "4th year" };
       labelText = mapping[rawValue] || rawValue;
@@ -244,7 +278,6 @@ function drawArcsForPart(partStartAngle, partEndAngle, keyFunc, gender, radiusSt
       const mapping = { "1": "Less than 4 hour", "5": "5-10 hours", "10": "11-14 hours", "15": "More than 15 hours" };
       labelText = mapping[rawValue] || rawValue;
     } else if (keyParts[2] === "AcademicEngagement") {
-      // For Academic Engagement, display endpoints (or a range if desired)
       if (rawValue === "1") {
         labelText = "Very Low";
       } else if (rawValue === "2") {
@@ -269,13 +302,14 @@ function drawArcsForPart(partStartAngle, partEndAngle, keyFunc, gender, radiusSt
         labelText = "Very Good";
       }
     }
-    
+
+    // Store arc details
     arcs.push({
       age: age,
       gender: gender,
       attribute: keyParts[2],
-      value: rawValue,      // Original value
-      labelText: labelText, // Transformed sub-label text
+      value: rawValue,
+      labelText: labelText,
       ratio: ratio,
       innerRadius: innerR,
       outerRadius: outerR,
@@ -285,7 +319,13 @@ function drawArcsForPart(partStartAngle, partEndAngle, keyFunc, gender, radiusSt
   }
 }
 
+
+
+
+
 function drawRadialSegments(startAngle, endAngle, attributes, gender) {
+  blendMode(MULTIPLY); // 색상 중첩 방지
+  //blendMode(BLEND);
   let totalAngle = abs(endAngle - startAngle);
   let maxRadius = height / 2.5;
   let radiusStep = maxRadius / 7;
@@ -394,6 +434,7 @@ function drawRadialSegments(startAngle, endAngle, attributes, gender) {
       }
     }
   });
+  blendMode(BLEND)
 }
 
 function drawAgeLabels() {
@@ -422,12 +463,13 @@ function drawAttributeLabelsWithColor(startAngle, endAngle, attributes, hoveredA
     let x = (maxRadius + 20) * cos(attrCenterAngle);
     let y = (maxRadius + 20) * sin(attrCenterAngle);
     // Default color: gray (e.g., 150); if hovered attribute equals attr.label, use black (0)
-    if (attr.label === hoveredAttribute) {
-      fill(0);
-    } else {
-      fill(150);
-    }
-    text(attr.label, x, y);
+    fill(150);
+  if (attr.label === hoveredAttribute) {
+    fill(0);
+    stroke(255); // 배경과 대비되는 흰색 테두리
+    strokeWeight(1);
+  }
+  text(attr.label, x, y);
   });
 }
 
@@ -438,10 +480,11 @@ function showTooltip() {
   let a = atan2(my, mx);
   let hovered = null;
 
+  // 마우스 위치가 세그먼트 내부에 있는지 확인
   for (let arcObj of arcs) {
     if (
       d >= arcObj.innerRadius &&
-      d <= arcObj.outerRadius &&
+      d < arcObj.outerRadius && // 외부 반지름 조건을 포함하지 않도록 수정
       isAngleBetween(a, arcObj.startAngle, arcObj.endAngle)
     ) {
       hovered = arcObj;
@@ -450,7 +493,6 @@ function showTooltip() {
   }
 
   if (hovered) {
-    // Draw tooltip background using screen coordinates
     push();
     resetMatrix();
     let tooltipX = mouseX + 10;
@@ -471,7 +513,7 @@ function showTooltip() {
     text(tooltipText, tooltipX + padding, tooltipY + padding);
     pop();
 
-    // Draw sub-label outside the circle (below the main label)
+    // 툴팁의 위치를 정확히 계산
     let mainLabelR = height / 2.5;
     let offset = 20;
     let subLabelR = mainLabelR + offset;
@@ -479,7 +521,6 @@ function showTooltip() {
     let labelX = subLabelR * cos(midAngle);
     let labelY = subLabelR * sin(midAngle);
     push();
-    //translate(width / 2, height / 2);
     textAlign(CENTER, CENTER);
     textSize(16);
     fill(0);
@@ -506,4 +547,159 @@ function getStudyHoursCategory(hours) {
   else if (hours >= 10 && hours <= 14) return "10-14";
   else if (hours >= 15 && hours <= 19) return "15-19";
   return "Unknown";
+}
+
+
+
+function drawGenderLabels() {
+  
+
+  
+  // Female 라벨 (왼쪽 반원)
+  let femaleAngle = -PI/2; // 12시 방향에서 반시계방향으로 90도
+  let femaleX = cos(femaleAngle) * (height/2.5 + 20);
+  let femaleY = sin(femaleAngle) * (height/2.5 + 100);
+
+  let label = "Gender"; // 표시할 텍스트
+  
+  let padding = 40; // 배경 사각형 여백
+  let textW = textWidth(label) + padding * 2; // 텍스트 너비 + 여백
+  let textH = 50;  // 텍스트 높이 (임의 조정 가능)
+
+  // 배경 사각형 그리기
+  noStroke();
+  fill(253, 231, 140); // 연한 빨강 배경
+  rectMode(CENTER);
+  rect(femaleX, femaleY, textW, textH); // 중앙 기준으로 배치
+
+  textSize(24);
+  fill(0); // 다시 텍스트 색상 설정
+  textAlign(CENTER, CENTER);
+
+
+  text("Female", femaleX, femaleY);
+
+  // Male 라벨 (오른쪽 반원)
+  let maleAngle = PI/2; // 12시 방향에서 시계방향으로 90도
+  let maleX = cos(maleAngle) * (height/2.5 + 20);
+  let maleY = sin(maleAngle) * (height/2.5 + 100);
+
+  noStroke();
+  fill(182, 219, 167); // 연한 빨강 배경
+  rectMode(CENTER);
+  rect(maleX, maleY, textW, textH); // 중앙 기준으로 배치
+
+  textSize(24);
+  fill(255); // 다시 텍스트 색상 설정
+  textAlign(CENTER, CENTER);
+  text("Male", maleX, maleY);
+}
+
+function drawCategoryDividers() {
+  stroke(255); // 검은색 선
+  strokeWeight(1); // 선 두께
+  noFill();
+  
+  let maxRadius = height/2.5;
+  
+  // 각 성별 절반에 대한 속성 수 (6개)
+  let segmentsPerHalf = 6;
+  let segmentAngle = PI / segmentsPerHalf; // π/6
+
+  // 여성 절반 (-π ~ 0)
+  for (let i = 0; i <= segmentsPerHalf; i++) {
+    let angle = -PI + i * segmentAngle;
+    let x = cos(angle) * maxRadius;
+    let y = sin(angle) * maxRadius;
+    line(0, 0, x, y);
+  }
+
+  // 남성 절반 (0 ~ π)
+  for (let i = 0; i <= segmentsPerHalf; i++) {
+    let angle = 0 + i * segmentAngle;
+    let x = cos(angle) * maxRadius;
+    let y = sin(angle) * maxRadius;
+    line(0, 0, x, y);
+  }
+}
+
+
+function getAttributeStartAngle(attributeLabel) {
+  let totalAngle = PI * 2;
+  let index = attributes.findIndex(a => a.label === attributeLabel);
+  return (index / attributes.length) * totalAngle - PI;
+}
+
+// 레전드 설정
+let legend = {
+  x: 0,
+  y: 0,
+  w: 100,     // 너비
+  h: height/2.5 * 2, // 원 차트의 지름과 동일한 높이
+  margin: 20
+};
+
+// drawLegend 함수 수정
+function drawLegend() {
+  push();
+  resetMatrix();
+  
+  // 레전드 위치 및 크기 설정
+  let legendX = 60;
+  let legendY = height/2 - 100;
+  let gradWidth = 30;
+  let gradHeight = 200;
+
+  // 배경 추가
+  noFill();
+  noStroke();
+  rect(legendX + 50, legendY - 10, gradWidth + 50, gradHeight + 20, 5);
+
+  // 부드러운 그라데이션 생성
+  for(let y = 0; y < gradHeight; y += 1.5) { // 1.5px 간격으로 밀도 증가
+    let alpha = map(y, 0, gradHeight, 0, 255);
+    fill(70, 70, 70, alpha); // 더 진한 회색 사용
+    noStroke();
+    rect(legendX, legendY + y, gradWidth, 2); // 높이 2px로 증가
+  }
+
+  // 퍼센트 라벨
+  fill(0);
+  textAlign(LEFT, CENTER);
+  textSize(12);
+  text(nf(globalMinRatio*100, 1, 2) + "%", 0, legendY); // 최소값
+  text(nf(globalMaxRatio*100, 1, 2) + "%", 0, legendY + gradHeight); // 최대값
+
+  
+  // 레전드 제목
+  textAlign(CENTER, BOTTOM);
+  textSize(14);
+  fill(50); // 어두운 회색 텍스트
+  text("Percentage Scale", legendX + gradWidth/2, legendY - 15);
+  
+  pop();
+}
+
+
+
+
+
+
+function drawDynamicLabel() {
+  push();
+  resetMatrix();
+  translate(0, 50); // 캔버스 상단 중앙
+  
+  textSize(16);
+  textAlign(LEFT, TOP);
+  fill(0);
+
+  let activeConditions = Object.keys(filters).filter(k => filters[k]);
+  let description = activeConditions.length > 0
+    ? `Color brightness shows the percentage of students with 
+      ${activeConditions.join(" or ")} in each group`
+    : "Color brightness shows the overall distribution of students";
+
+  text(description, 0, 0);
+  pop();
 }
